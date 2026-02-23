@@ -1,0 +1,64 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+pip-wheel-metadata/
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+.cache/
+.mypy_cache/
+.ruff_cache/
+pytestdebug.log
+
+# ===== IDE (PyCharm/IntelliJ) =====
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code (если вдруг)
+.vscode/
+
+# ===== OS files =====
+.DS_Store
+Thumbs.db
+
+# ===== Env / secrets =====
+.env
+.env.*
+!.env.example
+
+# ===== Logs =====
+*.log
+logs/
+
+# ===== Local data / DB =====
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== Build / dist =====
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ===== Docker =====
+# (обычно не надо игнорить compose-файлы, но можно игнорить override'ы)
+docker-compose.override.yml
+
+# ===== Jupyter / notebooks =====
+.ipynb_checkpoints/
+
+# ===== Misc =====
+*.tmp
+*.swp
