@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{{APP_TITLE}}</title>
+  <style>
+    :root { --b:#e5e7eb; --mut:rgba(229,231,235,.7); --bg:#0b1220; --fg:#e5e7eb; }
+    body { margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--fg); }
+    .layout { display:grid; grid-template-columns: 340px 1fr; min-height:100vh; }
+    .side { border-right:1px solid rgba(229,231,235,.14); padding:18px; }
+    .main { padding:18px; }
+    .card { background: rgba(255,255,255,.04); border:1px solid rgba(229,231,235,.14); border-radius:16px; padding:14px; }
+    .h1 { font-size:18px; margin:0 0 8px 0; font-weight:800; }
+    .muted { color:var(--mut); font-size:13px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    input { background:rgba(255,255,255,.06); color:var(--fg); border:1px solid rgba(229,231,235,.18);
+            border-radius:12px; padding:10px 12px; font-size:14px; outline:none; }
+    button { background:#e5e7eb; color:#0b1220; border:0; border-radius:12px; padding:10px 12px; font-weight:750; cursor:pointer; }
+    .list { margin-top:10px; display:flex; flex-direction:column; gap:8px; max-height: 38vh; overflow:auto; padding-right:4px; }
+    .item { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border-radius:12px;
+            border:1px solid rgba(229,231,235,.12); background:rgba(255,255,255,.03); }
+    .item input { width:16px; height:16px; margin-top:2px; }
+    .t { font-size:14px; font-weight:650; }
+    .s { font-size:12px; color:rgba(229,231,235,.65); }
+    .results { display:flex; flex-direction:column; gap:12px; margin-top:12px; }
+    .badge { font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid rgba(229,231,235,.18); color:rgba(229,231,235,.75); }
+    pre { background: rgba(0,0,0,.35); border:1px solid rgba(229,231,235,.12); border-radius:14px; padding:12px; overflow:auto; }
+    .title { font-size:16px; font-weight:850; margin:0; }
+    .k { color:rgba(229,231,235,.75); font-size:12px; margin-top:8px; }
+    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } .side { border-right:none; border-bottom:1px solid rgba(229,231,235,.14);} }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="side">
+      <div class="card">
+        <div class="h1">{{APP_TITLE}}</div>
+        <div class="muted">Google Sheets (public xlsx) → SQLite → поиск/фильтры</div>
+        <div class="muted" id="syncInfo" style="margin-top:8px;"></div>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;">
+          <div class="muted">Темы</div>
+          <button id="clearTopics">Сброс</button>
+        </div>
+        <div class="list" id="topics"></div>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;">
+          <div class="muted">Теги</div>
+          <button id="clearTags">Сброс</button>
+        </div>
+        <input id="tagSearch" placeholder="Фильтр по тегам…" style="width:100%; margin-top:10px;"/>
+        <div class="list" id="tags"></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="card">
+        <div class="row">
+          <input id="q" placeholder="Поиск по тексту…" style="flex:1; min-width:220px;"/>
+          <input id="words" placeholder="Доп. слова (через пробел)…" style="flex:1; min-width:220px;"/>
+          <button id="btn">Найти</button>
+        </div>
+        <div class="row" style="justify-content:space-between; margin-top:10px;">
+          <div class="muted" id="status">Готово.</div>
+          <span class="badge" id="ftsBadge"></span>
+        </div>
+      </div>
+
+      <div class="results" id="results"></div>
+    </main>
+  </div>
+
+<script>
+  const elTopics = document.getElementById('topics');
+  const elTags = document.getElementById('tags');
+  const elResults = document.getElementById('results');
+  const elStatus = document.getElementById('status');
+  const elFts = document.getElementById('ftsBadge');
+  const elSync = document.getElementById('syncInfo');
+
+  const q = document.getElementById('q');
+  const words = document.getElementById('words');
+  const btn = document.getElementById('btn');
+  const clearTopics = document.getElementById('clearTopics');
+  const clearTags = document.getElementById('clearTags');
+  const tagSearch = document.getElementById('tagSearch');
+
+  let TOPICS = [];
+  let TAGS = [];
+
+  function escapeHtml(s) {
+    return String(s ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+  }
+  function selected(name) {
+    return [...document.querySelectorAll(`input[data-${name}="1"]:checked`)].map(x => x.value);
+  }
+
+  async function loadAll() {
+    const [rt, rg, rs] = await Promise.all([fetch('/api/topics'), fetch('/api/tags'), fetch('/api/status')]);
+    TOPICS = (await rt.json()).items || [];
+    TAGS = (await rg.json()).items || [];
+    const st = await rs.json();
+    elSync.textContent = st.last_sync_at ? `Последний синк: ${st.last_sync_at}` : 'Синк ещё не выполнялся.';
+    renderTopics();
+    renderTags();
+  }
+
+  function renderTopics() {
+    elTopics.innerHTML = '';
+    for (const t of TOPICS) {
+      const div = document.createElement('label');
+      div.className = 'item';
+      div.innerHTML = `
+        <input type="checkbox" data-topic="1" value="${escapeHtml(t.topic_id)}"/>
+        <div>
+          <div class="t">${escapeHtml(t.title_ru || t.topic_id)}</div>
+          <div class="s">${escapeHtml(t.section || '')} · ${escapeHtml(t.topic_id)}</div>
+        </div>
+      `;
+      elTopics.appendChild(div);
+    }
+  }
+
+  function renderTags() {
+    const needle = tagSearch.value.trim().toLowerCase();
+    elTags.innerHTML = '';
+    for (const tg of TAGS) {
+      const text = `${tg.tag_id} ${tg.name_ru||''} ${tg.name_en||''}`.toLowerCase();
+      if (needle && !text.includes(needle)) continue;
+
+      const div = document.createElement('label');
+      div.className = 'item';
+      div.innerHTML = `
+        <input type="checkbox" data-tag="1" value="${escapeHtml(tg.tag_id)}"/>
+        <div>
+          <div class="t">${escapeHtml(tg.name_ru || tg.tag_id)}</div>
+          <div class="s">${escapeHtml(tg.tag_id)}${tg.name_en ? ' · ' + escapeHtml(tg.name_en) : ''}</div>
+        </div>
+      `;
+      elTags.appendChild(div);
+    }
+  }
+
+  async function runSearch() {
+    elResults.innerHTML = '';
+    elStatus.textContent = 'Ищем…';
+
+    const topics = selected('topic').join(',');
+    const tags = selected('tag').join(',');
+    const url = `/api/search?q=${encodeURIComponent(q.value.trim())}&words=${encodeURIComponent(words.value.trim())}&topics=${encodeURIComponent(topics)}&tags=${encodeURIComponent(tags)}&limit=30`;
+
+    const r = await fetch(url);
+    const data = await r.json();
+
+    elFts.textContent = data.fts ? 'FTS5: ON' : 'FTS5: OFF (LIKE)';
+    elSync.textContent = data.last_sync_at ? `Последний синк: ${data.last_sync_at}` : 'Синк ещё не выполнялся.';
+    elStatus.textContent = `Найдено: ${data.total}`;
+
+    for (const it of (data.items || [])) {
+      const card = document.createElement('div');
+      card.className = 'card';
+
+      const example = it.example ? `<pre><code>${escapeHtml(it.example)}</code></pre>` : '';
+      const whenUse = it.when_use ? `<div class="muted"><b>Когда использовать:</b> ${escapeHtml(it.when_use)}</div>` : '';
+      const pitfalls = it.pitfalls ? `<div class="muted"><b>Подводные камни:</b> ${escapeHtml(it.pitfalls)}</div>` : '';
+
+      card.innerHTML = `
+        <div class="row" style="justify-content:space-between; align-items:flex-start;">
+          <div>
+            <div class="title">${escapeHtml(it.concept || it.card_id)}</div>
+            <div class="muted">${escapeHtml(it.topic_title_ru || it.topic_id)} · ${escapeHtml(it.card_id)}</div>
+          </div>
+          <div class="badge">${escapeHtml(it.section || '')}</div>
+        </div>
+
+        <div style="height:10px"></div>
+        <div>${escapeHtml(it.brief || '')}</div>
+        <div style="height:10px"></div>
+        ${example}
+        <div style="height:8px"></div>
+        ${whenUse}
+        <div style="height:6px"></div>
+        ${pitfalls}
+        <div class="k">tags: ${escapeHtml(it.tags_text || '')}</div>
+        <div class="k">keywords: ${escapeHtml(it.keywords || '')}</div>
+      `;
+      elResults.appendChild(card);
+    }
+  }
+
+  btn.addEventListener('click', runSearch);
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+  words.addEventListener('keydown', (e) => { if (e.key === 'Enter') runSearch(); });
+  tagSearch.addEventListener('input', renderTags);
+
+  clearTopics.addEventListener('click', () => {
+    document.querySelectorAll('input[data-topic="1"]').forEach(x => x.checked = false);
+    runSearch();
+  });
+
+  clearTags.addEventListener('click', () => {
+    document.querySelectorAll('input[data-tag="1"]').forEach(x => x.checked = false);
+    runSearch();
+  });
+
+  (async function init() {
+    await loadAll();
+    await runSearch();
+  })();
+</script>
+</body>
+</html>
